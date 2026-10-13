@@ -99,8 +99,12 @@ class LibraryImportTest {
         assertTrue("فشل التعيين اليدوي: ${result.exceptionOrNull()?.message}", result.isSuccess)
 
         assertNotNull(library.trackFor(114))
-        val list = library.surahList.first { it.isNotEmpty() }
-        assertTrue("السورة 114 يجب أن تظهر كمتوفرة بعد التعيين", list.first { it.number == 114 }.available)
+
+        // نتحقق من نفس التدفق الذي تعرضه الواجهة (يتحدّث لحظيًا بعد التعيين)
+        val becameAvailable = TestSupport.waitUntil(15_000L) {
+            library.surahList.value.firstOrNull { it.number == 114 }?.available == true
+        }
+        assertTrue("السورة 114 يجب أن تظهر كمتوفرة بعد التعيين", becameAvailable)
     }
 
     @Test

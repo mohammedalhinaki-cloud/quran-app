@@ -317,6 +317,17 @@ jobs:
             echo "PHASE1_VERDICT=unknown" | tee -a /tmp/inst.log
           fi
 
+          log "=== المرحلة 1ج: لقطات شاشة حقيقية (والتشغيل حيّ) ==="
+          timeout 900 adb shell am instrument -w -r \
+            -e class com.borhji.mushaf.ScreenshotTest \
+            "$RUNNER" > /tmp/phase1c.log 2>&1
+          echo "PHASE1C_EXIT=$?" | tee -a /tmp/inst.log
+          cat /tmp/phase1c.log >> /tmp/inst.log
+          timeout 120 adb shell "run-as com.borhji.mushaf.debug ls -l files 2>/dev/null" | tee -a /tmp/inst.log || true
+          rm -rf /tmp/shots && mkdir -p /tmp/shots
+          timeout 180 adb pull /sdcard/Android/data/com.borhji.mushaf.debug/files/shots /tmp/shots 2>&1 | tail -8 | tee -a /tmp/inst.log || true
+          ls -l /tmp/shots/shots 2>/dev/null | tee -a /tmp/inst.log || true
+
           log "=== المرحلة 1ب: تجهيز موضع استماع حقيقي قبل إعادة التشغيل ==="
           timeout 900 adb shell am instrument -w -r \
             -e class com.borhji.mushaf.RebootPrepareTest \
@@ -330,17 +341,6 @@ jobs:
           else
             echo "PHASE1B_VERDICT=unknown" | tee -a /tmp/inst.log
           fi
-          log "=== المرحلة 1ج: لقطات شاشة حقيقية (والتشغيل حيّ) ==="
-          timeout 900 adb shell am instrument -w -r \
-            -e class com.borhji.mushaf.ScreenshotTest \
-            "$RUNNER" > /tmp/phase1c.log 2>&1
-          echo "PHASE1C_EXIT=$?" | tee -a /tmp/inst.log
-          cat /tmp/phase1c.log >> /tmp/inst.log
-          timeout 120 adb shell "run-as com.borhji.mushaf.debug ls -l files 2>/dev/null" | tee -a /tmp/inst.log || true
-          rm -rf /tmp/shots && mkdir -p /tmp/shots
-          timeout 180 adb pull /sdcard/Android/data/com.borhji.mushaf.debug/files/shots /tmp/shots 2>&1 | tail -8 | tee -a /tmp/inst.log || true
-          ls -l /tmp/shots/shots 2>/dev/null | tee -a /tmp/inst.log || true
-
           { echo "## (تفتيش 4ب) تجهيز حالة الاستئناف قبل إعادة التشغيل — الجلسة ${{ github.run_number }}"; echo '```'; grep -E "PREPARED_|Tests run|OK|FAILURES|PHASE1B" /tmp/phase1b.log | tail -20; echo '```'; echo "### لقطات الشاشة الملتقطة"; echo '```'; grep -aE "SCREENSHOT" /tmp/phase1c.log | tail -10; echo '```'; } > /tmp/c4b.md
           jq -n --arg body "$(cat /tmp/c4b.md)" '{body:$body}' > /tmp/c4b.json
           gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c4b.json || true
