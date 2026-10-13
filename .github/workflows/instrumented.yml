@@ -1,0 +1,122 @@
+name: Instrumented Tests (Emulator)
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  emulator:
+    name: اختبارات حقيقية على محاكي أندرويد (بدون خدمات جوجل)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: تنزيل الشيفرة
+        uses: actions/checkout@v4
+
+      - name: تهيئة Java 17
+        continue-on-error: true
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: تهيئة Gradle (تخزين مؤقت)
+        continue-on-error: true
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: تهيئة Android SDK
+        run: |
+          : > /tmp/inst.log
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+
+      - name: تشغيل الاختبارات على المحاكي
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none -camera-front none
+          script: |
+            set -o pipefail
+            echo "=== بدء الاختبارات ===" | tee -a /tmp/inst.log
+            PKG=com.borhji.mushaf.debug
+            adb shell pm clear $PKG || true
+            # وضع الطيران: التأكد من أن كل الوظائف تعمل دون إنترنت
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            adb shell settings put global airplane_mode_on 1 || true
+            adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
+            echo "=== المرحلة 1: الاستيراد والتشغيل والخلفية والواجهة ===" | tee -a /tmp/inst.log
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.borhji.mushaf.LibraryImportTest,com.borhji.mushaf.PlaybackTest,com.borhji.mushaf.UiSmokeTest \
+              2>&1 | tee -a /tmp/inst.log
+            echo "PHASE1_EXIT=${PIPESTATUS[0]}" | tee -a /tmp/inst.log
+            cp -r app/build/outputs/androidTest-results /tmp/results-phase1 2>/dev/null || true
+            echo "=== إعادة تشغيل الجهاز ===" | tee -a /tmp/inst.log
+            adb reboot || true
+            adb wait-for-device || true
+            for i in $(seq 1 60); do
+              BOOTED=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+              if [ "$BOOTED" = "1" ]; then break; fi
+              sleep 5
+            done
+            adb shell input keyevent 82 || true
+            sleep 25
+            echo "BOOT_COMPLETED=$(adb shell getprop sys.boot_completed | tr -d '\r')" | tee -a /tmp/inst.log
+            echo "=== المرحلة 2: اختبارات ما بعد إعادة التشغيل ===" | tee -a /tmp/inst.log
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.borhji.mushaf.RebootPersistenceTest \
+              2>&1 | tee -a /tmp/inst.log
+            echo "PHASE2_EXIT=${PIPESTATUS[0]}" | tee -a /tmp/inst.log
+            cp -r app/build/outputs/androidTest-results /tmp/results-phase2 2>/dev/null || true
+
+      - name: نشر تقرير الاختبارات (تعليق على الكوميت)
+        if: always()
+        continue-on-error: true
+        run: |
+          {
+            echo "## تقرير الاختبارات الحقيقية على المحاكي — الجلسة ${{ github.run_number }}"
+            echo ""
+            echo "* الفرع: \`${{ github.ref_name }}\`"
+            echo "* الكوميت: \`${{ github.sha }}\`"
+            echo "* النتيجة الكلية للمهمة: \`${{ job.status }}\`"
+            echo ""
+            echo "### نتائج الاختبارات (XML)"
+            for dir in /tmp/results-phase1 /tmp/results-phase2; do
+              echo "**$dir**"
+              if [ -d "$dir" ]; then
+                grep -rhoE '<testsuite [^>]*>' "$dir" 2>/dev/null | sed -E 's/.*name="([^"]*)".*tests="([0-9]+)".*failures="([0-9]+)".*errors="([0-9]+)".*skipped="([0-9]+)".*/  name=\1 tests=\2 failures=\3 errors=\4 skipped=\5/' || true
+                grep -rhoE '<testcase name="[^"]*"' "$dir" 2>/dev/null | sed 's/^/  - /' | head -40 || true
+                grep -rhoE '<failure[^>]*message="[^"]{0,300}' "$dir" 2>/dev/null | sed 's/^/  FAIL: /' | head -30 || true
+              else
+                echo "  لا توجد نتائج"
+              fi
+            done
+            echo ""
+            echo "### سجل الاختبارات (آخر 200 سطر)"
+            echo '```'
+            tail -200 /tmp/inst.log 2>/dev/null || echo "لا يوجد سجل"
+            echo '```'
+          } > /tmp/report-inst.md
+          jq -n --arg body "$(cat /tmp/report-inst.md)" '{body:$body}' > /tmp/report-inst.json
+          gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/report-inst.json

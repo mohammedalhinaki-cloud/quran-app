@@ -167,7 +167,7 @@ class LibraryRepository(
         scope.launch {
             _importState.value = ImportState.Running(0, uris.size, "")
             try {
-                val outcome = importFiles(uris, copyIntoApp) { progress ->
+                val outcome = importNow(uris, copyIntoApp) { progress ->
                     _importState.value = ImportState.Running(
                         progress.processed, progress.total, progress.currentName,
                     )
@@ -207,10 +207,13 @@ class LibraryRepository(
         }
     }
 
-    private suspend fun importFiles(
+    /**
+     * تنفيذ الاستيراد فعليًا وإرجاع النتيجة (دالة معلّقة قابلة للاختبار).
+     */
+    suspend fun importNow(
         uris: List<Uri>,
         copyIntoApp: Boolean,
-        onProgress: (ImportProgress) -> Unit,
+        onProgress: (ImportProgress) -> Unit = {},
     ): ImportOutcome = withContext(Dispatchers.IO) {
         val existing = trackDao.getAll().associateBy { it.surahNumber }
         val handled = HashSet<Int>()
