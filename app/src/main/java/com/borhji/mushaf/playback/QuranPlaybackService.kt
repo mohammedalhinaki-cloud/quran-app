@@ -19,6 +19,10 @@ import com.borhji.mushaf.MainActivity
 import com.borhji.mushaf.MushafApp
 import com.borhji.mushaf.R
 import com.borhji.mushaf.di.AppContainer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -37,6 +41,8 @@ class QuranPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private lateinit var container: AppContainer
 
+    /** كل الوصول إلى ExoPlayer يجب أن يبقى على الخيط الرئيسي (متطلب Media3) */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val handler = Handler(Looper.getMainLooper())
     private var consecutiveErrors = 0
     private var lastErrorAt = 0L
@@ -107,8 +113,10 @@ class QuranPlaybackService : MediaSessionService() {
         exoPlayer.addListener(playerListener)
         player = exoPlayer
 
-        // استعادة سرعة التشغيل ووضع التكرار المحفوظين
-        container.appScope.launch {
+        // استعادة سرعة التشغيل ووضع التكرار المحفوظين.
+        // ملاحظة: قراءة الإعدادات تعليقية (DataStore يقرأ في خيط خلفي)،
+        // ثم نعود إلى الخيط الرئيسي قبل لمس المشغل — Media3 يرفض الوصول من خيط آخر.
+        serviceScope.launch {
             val prefs = container.settings.snapshot()
             exoPlayer.setPlaybackSpeed(prefs.speed)
             exoPlayer.repeatMode =
@@ -145,6 +153,7 @@ class QuranPlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         stopTicker()
+        serviceScope.cancel()
         mediaSession?.run {
             player.release()
             release()
