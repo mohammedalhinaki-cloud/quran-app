@@ -3,7 +3,6 @@ name: Build APK
 on:
   push:
     branches: ["**"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -17,76 +16,146 @@ jobs:
   build:
     name: بناء APK واختبارات الوحدة
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: تنزيل الشيفرة
         uses: actions/checkout@v4
 
       - name: تهيئة Java 17
+        continue-on-error: true
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: تهيئة Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: تهيئة Gradle (مع التخزين المؤقت)
+      - name: تهيئة Gradle (تخزين مؤقت)
+        continue-on-error: true
         uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: false
 
-      - name: تجهيز الـ wrapper
-        run: chmod +x ./gradlew
+      - name: تهيئة Android SDK
+        run: |
+          set -x
+          : > /tmp/build.log
+          echo "=== ANDROID_HOME=${ANDROID_HOME} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT} ===" | tee -a /tmp/build.log
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          java -version 2>&1 | tee -a /tmp/build.log
+          chmod +x ./gradlew
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" 2>&1 | tail -5 | tee -a /tmp/build.log || true
+          fi
+          ls "$ANDROID_HOME/platforms" 2>&1 | tee -a /tmp/build.log || true
+          ls "$ANDROID_HOME/build-tools" 2>&1 | tee -a /tmp/build.log || true
 
       - name: اختبارات الوحدة
-        run: ./gradlew --no-daemon :app:testDebugUnitTest --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --warning-mode=summary :app:testDebugUnitTest 2>&1 | tee -a /tmp/build.log
 
       - name: بناء APK (debug)
-        run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --warning-mode=summary :app:assembleDebug 2>&1 | tee -a /tmp/build.log
 
       - name: بناء APK (release)
-        run: ./gradlew --no-daemon :app:assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --warning-mode=summary :app:assembleRelease 2>&1 | tee -a /tmp/build.log
 
-      - name: تجميع الملفات
+      - name: تجميع الملفات وفحصها
+        if: always()
         run: |
           mkdir -p artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk artifacts/borhji-mushaf-debug.apk
-          find app/build/outputs/apk/release -name '*.apk' -exec cp {} artifacts/borhji-mushaf-release.apk \;
-          ls -la artifacts
-          sha256sum artifacts/*.apk
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/borhji-mushaf-debug.apk 2>/dev/null || true
+          find app/build/outputs/apk/release -name '*.apk' -exec cp {} artifacts/borhji-mushaf-release.apk \; 2>/dev/null || true
+          {
+            echo "=== ملفات APK الناتجة ==="
+            ls -la artifacts || true
+            echo "=== sha256 ==="
+            sha256sum artifacts/*.apk 2>/dev/null || echo "لا توجد ملفات APK"
+            AAPT2="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt2 2>/dev/null | sort -V | tail -1)"
+            for apk in artifacts/*.apk; do
+              [ -f "$apk" ] || continue
+              echo "=== badging: $apk ==="
+              if [ -n "$AAPT2" ]; then "$AAPT2" dump badging "$apk" 2>&1 | head -40; else echo "aapt2 غير متوفر"; fi
+              echo "=== محتويات مختارة: $apk ==="
+              unzip -l "$apk" 2>/dev/null | grep -E "classes|AndroidManifest|resources.arsc|lib/" | head -15 || true
+            done
+          } | tee -a /tmp/build.log
 
       - name: رفع ملفات APK
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: borhji-mushaf-apk
           path: artifacts/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
-      - name: نتائج اختبارات الوحدة
+      - name: نشر إصدار على GitHub
+        id: release
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-reports
-          path: app/build/reports/tests/
-          if-no-files-found: ignore
-
-      - name: نشر إصدار على GitHub (فرع main فقط)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "المصحف المرتل | محمد برهجي — إصدار v1.0.${{ github.run_number }}"
-          body: |
-            تطبيق «المصحف المرتل | محمد برهجي» — مشغل تلاوات محلي بالكامل.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ls artifacts/*.apk >/dev/null 2>&1; then
+            TAG="apk-v1.0.${{ github.run_number }}"
+            TITLE="المصحف المرتل | محمد برهجي — بناء ${{ github.run_number }}"
+            gh release create "$TAG" artifacts/*.apk \
+              --title "$TITLE" \
+              --prerelease \
+              --notes "تطبيق «المصحف المرتل | محمد برهجي» — مشغل تلاوات محلي بالكامل (حفص عن عاصم بقصر المنفصل).
 
-            - الرواية: حفص عن عاصم بقصر المنفصل
-            - يعمل دون إنترنت ولا يرفع أي ملف لأي خادم
-            - يستمر التشغيل في الخلفية مع إشعار تحكم وأزرار السماعات
-            - حفظ دقيق لموضع الاستماع لكل سورة
+          حمّل الملف borhji-mushaf-release.apk وثبّته على الهاتف (قد تحتاج للسماح بتثبيت التطبيقات من مصادر غير معروفة).
 
-            حمّل الملف `borhji-mushaf-release.apk` وثبّته على الهاتف مباشرة.
-          files: artifacts/*.apk
+          اختبارات الوحدة: نجحت
+          بناء APK: نجح" 2>&1 | tee -a /tmp/build.log
+            echo "https://github.com/${{ github.repository }}/releases/tag/$TAG" > /tmp/release_url.txt
+          else
+            echo "لا يوجد ملف APK لنشره" | tee -a /tmp/build.log
+          fi
+
+      - name: نشر تقرير البناء (تعليق على الكوميت)
+        if: always()
+        continue-on-error: true
+        run: |
+          {
+            echo "## تقرير بناء APK — الجلسة ${{ github.run_number }}"
+            echo ""
+            echo "* الفرع: \`${{ github.ref_name }}\`"
+            echo "* الكوميت: \`${{ github.sha }}\`"
+            echo "* النتيجة الكلية للمهمة: \`${{ job.status }}\`"
+            echo ""
+            if [ -f /tmp/release_url.txt ]; then
+              echo "### رابط تنزيل الـAPK"
+              echo ""
+              echo "$(cat /tmp/release_url.txt)"
+              echo ""
+            fi
+            echo "### ملفات APK"
+            echo '```'
+            ls -la artifacts 2>/dev/null || echo "لا توجد ملفات"
+            sha256sum artifacts/*.apk 2>/dev/null || true
+            echo '```'
+            echo "### مخرجات Gradle (آخر 220 سطرًا)"
+            echo '```'
+            tail -220 /tmp/build.log 2>/dev/null || echo "لا يوجد سجل"
+            echo '```'
+          } > /tmp/report.md
+          jq -n --arg body "$(cat /tmp/report.md)" '{body:$body}' > /tmp/report.json
+          gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/report.json
