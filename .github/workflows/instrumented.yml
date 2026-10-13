@@ -377,10 +377,20 @@ jobs:
           H=$(echo "$SIZE" | cut -dx -f2)
           log "wm size=$SIZE"
           if [ -n "$W" ] && [ -n "$H" ]; then
-            # المشغل المصغّر أسفل الشاشة فوق شريط النظام
-            timeout 30 adb shell input tap $((W/2)) $((H - H/12))
-            sleep 5
-            timeout 90 adb exec-out screencap -p > /tmp/screenshots/03-player-sheet.png
+            # نجرّب عدة مواضع للمس حتى يفتح المشغل الموسّع فعلًا (النتيجة يجب أن تختلف عن الشاشة الرئيسية)
+            before=$(sha256sum /tmp/screenshots/01-home-playing.png | cut -c1-16)
+            for frac in 96 93 90 87; do
+              y=$(( H * frac / 100 ))
+              log "لمس الموضع y=$y (من $H)"
+              timeout 30 adb shell input tap $((W/2)) "$y"
+              sleep 5
+              timeout 90 adb exec-out screencap -p > /tmp/screenshots/03-player-sheet.png
+              after=$(sha256sum /tmp/screenshots/03-player-sheet.png | cut -c1-16)
+              if [ "$after" != "$before" ]; then
+                log "تم فتح المشغل الموسّع بنجاح عند y=$y"
+                break
+              fi
+            done
           fi
           log "=== بصمات لقطات الشاشة (يجب أن تختلف — تطابق البصمات يعني شاشة سوداء) ==="
           sha256sum /tmp/screenshots/*.png 2>/dev/null | tee -a /tmp/inst.log

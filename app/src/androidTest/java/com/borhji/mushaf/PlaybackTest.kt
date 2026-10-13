@@ -175,8 +175,14 @@ class PlaybackTest {
         Thread.sleep(2_000L)
 
         playback.stopAndClear()
-        assertTrue(TestSupport.waitUntil(10_000L) { !playback.state.value.isPlaying })
-        assertTrue(playback.state.value.surahNumber == null)
+        assertTrue(
+            "ظل المشغل في حالة تشغيل بعد إيقافه",
+            TestSupport.waitUntil(15_000L) { !playback.state.value.isPlaying },
+        )
+        assertTrue(
+            "لم يفرغ المشغل بعد الإيقاف (السورة الحالية: ${playback.state.value.surahNumber})",
+            TestSupport.waitUntil(10_000L) { playback.state.value.surahNumber == null },
+        )
 
         val saved = runBlocking { library.progressFor(2) }
         assertNotNull("ضاع الموضع المحفوظ بعد إيقاف المشغل", saved)

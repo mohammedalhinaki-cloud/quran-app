@@ -169,13 +169,19 @@ class PlaybackController(
             val startPosition = startPositionMs
                 ?: ProgressMath.startPosition(savedPosition, knownDuration)
 
-            mediaController.setMediaItems(
-                tracks.map { it.toMediaItem() },
-                index,
-                startPosition.coerceAtLeast(0L),
-            )
-            mediaController.prepare()
-            if (autoPlay) mediaController.play() else mediaController.pause()
+            try {
+                mediaController.setMediaItems(
+                    tracks.map { it.toMediaItem() },
+                    index,
+                    startPosition.coerceAtLeast(0L),
+                )
+                mediaController.prepare()
+                if (autoPlay) mediaController.play() else mediaController.pause()
+            } catch (_: Throwable) {
+                _messages.emit("تعذّر بدء التشغيل. حاول مرة أخرى.")
+                _state.update { it.copy(connected = false) }
+                return@launch
+            }
             recorder.onSurahChanged(surah, startPosition, knownDuration)
             _state.update { it.copy(errorMessage = null) }
             sync()
@@ -191,11 +197,16 @@ class PlaybackController(
                 playSurah(target)
                 return@launch
             }
-            if (mediaController.isPlaying) {
-                mediaController.pause()
+            val playing = try {
+                mediaController.isPlaying
+            } catch (_: Throwable) {
+                false
+            }
+            if (playing) {
+                withController { it.pause() }
                 persist(force = true)
             } else {
-                mediaController.play()
+                withController { it.play() }
             }
             sync()
         }
@@ -203,7 +214,7 @@ class PlaybackController(
 
     fun pause() {
         scope.launch {
-            controller?.pause()
+            withController { it.pause() }
             persist(force = true)
             sync()
         }
@@ -212,8 +223,7 @@ class PlaybackController(
     /** تحريك شريط التقدم إلى موضع محدد */
     fun seekTo(positionMs: Long) {
         scope.launch {
-            val mediaController = controller ?: return@launch
-            mediaController.seekTo(positionMs.coerceAtLeast(0L))
+            if (!withController { it.seekTo(positionMs.coerceAtLeast(0L)) }) return@launch
             persist(force = true)
             sync()
         }
@@ -227,7 +237,7 @@ class PlaybackController(
             val target = (mediaController.currentPosition + deltaMs)
                 .coerceAtLeast(0L)
                 .let { if (duration > 0L) it.coerceAtMost(duration) else it }
-            mediaController.seekTo(target)
+            if (!withController { it.seekTo(target) }) return@launch
             persist(force = true)
             sync()
         }
@@ -239,9 +249,9 @@ class PlaybackController(
             val mediaController = controller ?: return@launch
             if (mediaController.currentMediaItemIndex < mediaController.mediaItemCount - 1) {
                 persist(force = true)
-                mediaController.seekToNextMediaItem()
-                mediaController.prepare()
-                if (mediaController.playWhenReady) mediaController.play()
+                withController { it.seekToNextMediaItem() }
+                withController { it.prepare() }
+                if (mediaController.playWhenReady) withController { it.play() }
                 sync()
             } else {
                 _messages.emit("هذه آخر سورة متوفرة في المكتبة.")
@@ -255,9 +265,9 @@ class PlaybackController(
             val mediaController = controller ?: return@launch
             if (mediaController.currentMediaItemIndex > 0) {
                 persist(force = true)
-                mediaController.seekToPreviousMediaItem()
-                mediaController.prepare()
-                if (mediaController.playWhenReady) mediaController.play()
+                withController { it.seekToPreviousMediaItem() }
+                withController { it.prepare() }
+                if (mediaController.playWhenReady) withController { it.play() }
                 sync()
             } else {
                 _messages.emit("هذه أول سورة في المكتبة.")
@@ -269,7 +279,7 @@ class PlaybackController(
     fun setSpeed(speed: Float) {
         scope.launch {
             val safe = speed.coerceIn(0.5f, 2.0f)
-            controller?.setPlaybackSpeed(safe)
+            withController { it.setPlaybackSpeed(safe) }
             settings.setSpeed(safe)
             _state.update { it.copy(speed = safe) }
         }
@@ -280,8 +290,9 @@ class PlaybackController(
         scope.launch {
             val mediaController = controller ?: return@launch
             val enabled = mediaController.repeatMode != Player.REPEAT_MODE_ONE
-            mediaController.repeatMode =
-                if (enabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            withController {
+                it.repeatMode = if (enabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            }
             settings.setRepeatOne(enabled)
             _state.update { it.copy(repeatOne = enabled) }
         }
@@ -291,18 +302,47 @@ class PlaybackController(
     fun stopAndClear() {
         scope.launch {
             val mediaController = controller
-            val surah = PlaybackConstants.surahFromMediaId(mediaController?.currentMediaItem?.mediaId)
-            if (mediaController != null && surah != null) {
-                recorder.onStop(surah, mediaController.currentPosition, resolveDuration(mediaController))
+            val surah = try {
+                PlaybackConstants.surahFromMediaId(mediaController?.currentMediaItem?.mediaId)
+            } catch (_: Throwable) {
+                null
             }
-            mediaController?.stop()
-            mediaController?.clearMediaItems()
+            if (mediaController != null && surah != null) {
+                try {
+                    recorder.onStop(
+                        surah,
+                        mediaController.currentPosition,
+                        resolveDuration(mediaController),
+                    )
+                } catch (_: Throwable) {
+                    // نتجاهل: المهم ألا يفشل الإيقاف
+                }
+            }
+            withController { it.stop() }
+            withController { it.clearMediaItems() }
             stopTicker()
-            _state.update { PlayerState(connected = true, speed = prefs.speed, repeatOne = prefs.repeatOne) }
+            _state.update {
+                PlayerState(connected = true, speed = prefs.speed, repeatOne = prefs.repeatOne)
+            }
         }
     }
 
     // ------------------------------------------------------------------ أدوات داخلية
+
+    /**
+     * تنفيذ أمر على المشغل بأمان: إذا كانت الخدمة قد أُوقفت من النظام وصار المتحكم
+     * غير متصل، لا نُسقط الواجهة ولا نفقد الموضع المحفوظ — نتجاهل الأمر ونحدّث الحالة.
+     */
+    private inline fun withController(block: (MediaController) -> Unit): Boolean {
+        val mediaController = controller ?: return false
+        return try {
+            block(mediaController)
+            true
+        } catch (_: Throwable) {
+            _state.update { it.copy(connected = false) }
+            false
+        }
+    }
 
     private suspend fun awaitController(timeoutMs: Long = 3_000L): MediaController? {
         controller?.let { return it }
@@ -337,7 +377,12 @@ class PlaybackController(
             _state.update { it.copy(connected = false) }
             return
         }
-        val item = mediaController.currentMediaItem
+        val item = try {
+            mediaController.currentMediaItem
+        } catch (_: Throwable) {
+            _state.update { it.copy(connected = false) }
+            return
+        }
         val surah = PlaybackConstants.surahFromMediaId(item?.mediaId)
         val duration = resolveDuration(mediaController)
         _state.update {
