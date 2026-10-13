@@ -27,13 +27,12 @@ object TimeFormat {
         }
     }
 
+    /** صيغة السرعة: 1.0x و 1.5x و 0.75x (بدون أصفار زائدة) */
     fun formatSpeed(speed: Float): String {
         val rounded = Math.round(speed * 100f) / 100f
-        return if (rounded == rounded.toInt().toFloat()) {
-            String.format(Locale.US, "%.1fx", rounded)
-        } else {
-            String.format(Locale.US, "%.2fx", rounded)
-        }
+        val text = String.format(Locale.US, "%.2f", rounded)
+        val trimmed = if (text.endsWith("0")) text.dropLast(1) else text
+        return "${trimmed}x"
     }
 
     /** عدد الثواني بصيغة عربية مختصرة: 10 ثوانٍ */
