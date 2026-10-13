@@ -76,7 +76,7 @@ class QuranPlaybackService : MediaSessionService() {
                 container.recorder.onSurahFinished(
                     oldSurah,
                     oldPosition.positionMs,
-                    oldPosition.durationMs.takeIf { it > 0 } ?: 0L,
+                    0L, // المدة غير متوفرة هنا؛ يُحتفظ بالمدة المحفوظة سابقًا
                 )
                 container.recorder.onSurahChanged(newSurah, newPosition.positionMs, 0L)
             } else if (reason == Player.DISCONTINUITY_REASON_SEEK) {
@@ -120,12 +120,12 @@ class QuranPlaybackService : MediaSessionService() {
             .build()
             .apply {
                 setSmallIcon(R.drawable.ic_notification)
-                setChannelName(R.string.notification_channel_name)
             }
+        // إشعار التشغيل: يُدار من الخدمة نفسها (MediaSessionService)
+        setMediaNotificationProvider(notificationProvider)
 
         mediaSession = MediaSession.Builder(this, exoPlayer)
             .setSessionActivity(openAppIntent())
-            .setMediaNotificationProvider(notificationProvider)
             .build()
     }
 

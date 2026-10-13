@@ -116,7 +116,7 @@ fun MushafRoot(viewModel: MainViewModel = viewModel(factory = MainViewModel.Fact
                 onPickFiles = { pickFilesLauncher.launch(audioMimeTypes) },
                 onPickFolder = { pickFolderLauncher.launch(null) },
                 onQueryChange = { viewModel.onQueryChange(it) },
-                onToggleMissingOnly = { viewModel.onToggleMissingOnly() },
+                onToggleMissingOnly = { viewModel.onToggleMissingFilter() },
                 onPlaySurah = { viewModel.onPlaySurah(it) },
                 onResume = { viewModel.onResumeLast() },
                 onAssignFile = { startAssign(it) },

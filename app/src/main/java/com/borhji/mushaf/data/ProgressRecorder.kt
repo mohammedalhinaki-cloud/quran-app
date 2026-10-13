@@ -84,11 +84,17 @@ class ProgressRecorder(
         scope.launch {
             try {
                 if (writeDb) {
+                    // إذا كانت المدة غير معروفة في هذه اللحظة نحتفظ بالمدة المحفوظة سابقًا
+                    val duration = if (safeDuration > 0L) {
+                        safeDuration
+                    } else {
+                        progressDao.get(surah)?.durationMs ?: 0L
+                    }
                     progressDao.upsert(
                         ProgressEntity(
                             surahNumber = surah,
                             positionMs = position,
-                            durationMs = safeDuration,
+                            durationMs = duration,
                             updatedAt = System.currentTimeMillis(),
                         )
                     )

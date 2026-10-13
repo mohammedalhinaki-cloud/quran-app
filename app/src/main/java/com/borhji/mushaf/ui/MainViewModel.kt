@@ -189,11 +189,12 @@ class MainViewModel(
     fun onAssignFile(surah: Int, uri: Uri) {
         viewModelScope.launch {
             val result = library.assignFile(surah, uri, prefs.value.copyIntoApp)
-            result.onSuccess {
-                val name = SURAH_BY_NUMBER[surah]?.name ?: "$surah"
+            val name = SURAH_BY_NUMBER[surah]?.name ?: "$surah"
+            if (result.isSuccess) {
                 _uiMessage.emit("تم تعيين ملف سورة $name.")
-            }.onFailure {
-                _uiMessage.emit("تعذّر تعيين الملف: ${it.message ?: "خطأ غير معروف"}")
+            } else {
+                val reason = result.exceptionOrNull()?.message ?: "خطأ غير معروف"
+                _uiMessage.emit("تعذّر تعيين الملف: $reason")
             }
             _assignSurah.value = null
         }

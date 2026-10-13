@@ -31,7 +31,7 @@ object ArabicText {
             .replace('ئ', 'ي')
             .replace('ؤ', 'و')
             .replace('ة', 'ه')
-            .replace('ء', '')
+            .replace("ء", "")
             .replace('\u200f', ' ')
             .replace('\u200e', ' ')
         return s
