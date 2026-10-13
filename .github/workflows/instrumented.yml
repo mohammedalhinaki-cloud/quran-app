@@ -348,64 +348,16 @@ jobs:
           jq -n --arg body "$(cat /tmp/c4.md)" '{body:$body}' > /tmp/c4.json
           gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c4.json || true
 
-      # ---------- جمع الأدلة: سجل logcat + لقطات شاشة حقيقية ----------
-      - name: جمع الأدلة (لقطات شاشة حقيقية من المحاكي)
+      # ---------- جمع الأدلة من سجل النظام ----------
+      - name: جمع أدلة سجل النظام (logcat)
         if: always()
-        timeout-minutes: 12
+        timeout-minutes: 6
         run: |
           set +e
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-          log() { echo "$@" | tee -a /tmp/inst.log; }
-          mkdir -p /tmp/screenshots
-          rm -f /tmp/screenshots/*.png
-
-          log "=== أدلة من سجل النظام (logcat) ==="
           timeout 60 adb logcat -d > /tmp/logcat-phase1.txt 2>&1
-          grep -aE "NOTIFICATION_TITLE|NOTIFICATION_VISIBLE|PREPARED_" /tmp/logcat-phase1.txt | tail -20 | tee -a /tmp/inst.log
-
-          log "=== التقاط الشاشة الرئيسية ==="
-          timeout 30 adb shell svc power stayon true || true
-          timeout 30 adb shell input keyevent 224 || true
-          timeout 30 adb shell wm dismiss-keyguard || true
-          timeout 60 adb shell am start -n com.borhji.mushaf.debug/com.borhji.mushaf.MainActivity
-          sleep 8
-          log "النافذة الأمامية: $(timeout 20 adb shell dumpsys window | grep -m1 -i 'mCurrentFocus' || true)"
-          timeout 90 adb exec-out screencap -p > /tmp/screenshots/01-home-playing.png
-          ls -l /tmp/screenshots | tee -a /tmp/inst.log
-
-          log "=== التقاط لوحة الإشعارات (أثناء التشغيل) ==="
-          timeout 30 adb shell input keyevent 224 || true
-          timeout 60 adb shell cmd statusbar expand-notifications
-          sleep 4
-          timeout 90 adb exec-out screencap -p > /tmp/screenshots/02-notification-shade.png
-          timeout 60 adb shell cmd statusbar collapse
-          sleep 2
-
-          log "=== محاولة فتح المشغل الموسّع باللمس ==="
-          SIZE=$(timeout 30 adb shell wm size | tr -d '\r' | awk -F': ' '{print $2}')
-          W=$(echo "$SIZE" | cut -dx -f1)
-          H=$(echo "$SIZE" | cut -dx -f2)
-          log "wm size=$SIZE"
-          if [ -n "$W" ] && [ -n "$H" ]; then
-            # نجرّب عدة مواضع للمس حتى يفتح المشغل الموسّع فعلًا (النتيجة يجب أن تختلف عن الشاشة الرئيسية)
-            before=$(sha256sum /tmp/screenshots/01-home-playing.png | cut -c1-16)
-            for frac in 96 93 90 87; do
-              y=$(( H * frac / 100 ))
-              log "لمس الموضع y=$y (من $H)"
-              timeout 30 adb shell input tap $((W/2)) "$y"
-              sleep 5
-              timeout 90 adb exec-out screencap -p > /tmp/screenshots/03-player-sheet.png
-              after=$(sha256sum /tmp/screenshots/03-player-sheet.png | cut -c1-16)
-              if [ "$after" != "$before" ]; then
-                log "تم فتح المشغل الموسّع بنجاح عند y=$y"
-                break
-              fi
-            done
-          fi
-          log "=== بصمات لقطات الشاشة (يجب أن تختلف — تطابق البصمات يعني شاشة سوداء) ==="
-          sha256sum /tmp/screenshots/*.png 2>/dev/null | tee -a /tmp/inst.log
-          ls -l /tmp/screenshots | tee -a /tmp/inst.log
+          grep -aE "NOTIFICATION_TITLE|NOTIFICATION_VISIBLE|PREPARED_|EXPANDED_PLAYER_OPENED|SCREENSHOT " /tmp/logcat-phase1.txt | tail -20 | tee -a /tmp/inst.log
 
       # ---------- إعادة تشغيل الجهاز ----------
       - name: إعادة تشغيل الجهاز
@@ -464,10 +416,10 @@ jobs:
           timeout 30 adb shell wm dismiss-keyguard || true
           timeout 60 adb shell am start -n com.borhji.mushaf.debug/com.borhji.mushaf.MainActivity
           sleep 8
-          timeout 90 adb exec-out screencap -p > /tmp/screenshots/04-home-after-reboot.png
+          timeout 90 adb exec-out screencap -p > /tmp/shots/04-home-after-reboot.png
           timeout 60 adb logcat -d > /tmp/logcat-phase2.txt 2>&1
           grep -aE "NOTIFICATION_TITLE|PREPARED_" /tmp/logcat-phase2.txt | tail -10 >> /tmp/inst.log
-          ls -l /tmp/screenshots | tee -a /tmp/inst.log
+          ls -l /tmp/shots | tee -a /tmp/inst.log
 
       - name: حفظ لقطات الشاشة في المستودع
         if: always()
@@ -476,9 +428,9 @@ jobs:
           set +e
           ls -l /tmp/screenshots || exit 0
           mkdir -p screenshots
-          cp -f /tmp/screenshots/*.png screenshots/ 2>/dev/null || true
           cp -f /tmp/shots/shots/*.png screenshots/ 2>/dev/null || true
           cp -f /tmp/shots/*.png screenshots/ 2>/dev/null || true
+          [ -n "$(ls -A screenshots 2>/dev/null)" ] || exit 0
           [ -n "$(ls -A screenshots 2>/dev/null)" ] || exit 0
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
