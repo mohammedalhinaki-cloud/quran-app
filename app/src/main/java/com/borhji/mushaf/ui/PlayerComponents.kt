@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +71,9 @@ import com.borhji.mushaf.util.TimeFormat
 /** سرعات التشغيل المتاحة — 1.0x هي الافتراضية */
 val SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
 
+/** معرّف اختباري للمشغل المصغّر (يُستخدم في الاختبارات الحقيقية على الجهاز) */
+const val MINI_PLAYER_TAG = "mini-player"
+
 /** المشغل المصغّر الثابت أسفل الشاشة */
 @Composable
 fun MiniPlayer(
@@ -83,7 +87,9 @@ fun MiniPlayer(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(MINI_PLAYER_TAG),
     ) {
         Column {
             LinearProgressIndicator(
