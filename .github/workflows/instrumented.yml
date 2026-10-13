@@ -397,6 +397,10 @@ jobs:
             echo '```'
             grep -E "(junit\.framework|java\.lang\.AssertionError|Exception|Error|Caused by)" /tmp/inst.log 2>/dev/null | head -50 || true
             echo '```'
+            echo "### سجل البناء/التثبيت (آخر 60 سطرًا)"
+            echo '```'
+            grep -E "^e: |error:|Execution failed|BUILD FAILED|What went wrong|FAILED|Installed|Failure|BUILD_EXIT" /tmp/inst.log 2>/dev/null | tail -60 || echo "لا سجل بناء"
+            echo '```'
             echo "### سجل التجهيز (مقتطف)"
             echo '```'
             grep -E "kvm|SDKM=|AVDM=|AVD|avdmanager|SDK_IMG|EMU_BIN|EMU|محاولة|تم تثبيت|تعذّر|BOOT|استخدم|قائمة" /tmp/setup.log 2>/dev/null | tail -60 || echo "لا سجل تجهيز"

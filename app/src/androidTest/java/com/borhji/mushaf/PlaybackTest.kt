@@ -130,11 +130,12 @@ class PlaybackTest {
 
         // (1) تحقق فعلي من وجود إشعار التشغيل ومحتواه وأزرار التحكم عبر خدمة الإشعارات
         val manager =
-            app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            TestSupport.app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         var title = ""
         var actionCount = 0
         val found = TestSupport.waitUntil(25_000L, 500L) {
-            val active = manager.activeNotifications.firstOrNull { it.packageName == app.packageName }
+            val active = manager.activeNotifications
+                .firstOrNull { it.packageName == TestSupport.app.packageName }
             if (active != null) {
                 title = active.notification.extras
                     ?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
