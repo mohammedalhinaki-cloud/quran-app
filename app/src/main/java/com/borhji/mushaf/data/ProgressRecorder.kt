@@ -3,6 +3,8 @@ package com.borhji.mushaf.data
 import android.os.SystemClock
 import com.borhji.mushaf.util.ProgressMath
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 
 /**
@@ -21,6 +23,13 @@ class ProgressRecorder(
 ) {
     private var lastDbWrite = 0L
     private var lastSettingsWrite = 0L
+
+    /**
+     * مُرسِل أحادي الخيط لعمليات الحفظ: يضمن تنفيذ عمليات الحفظ بترتيب طلبها،
+     * فلا تتقدّم عملية حفظ أحدث على عملية أقدم (وهو ما قد يُفسد «آخر سورة محفوظة»).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val writer = Dispatchers.IO.limitedParallelism(1)
 
     /** نداء دوري أثناء التشغيل (مُقيَّد زمنيًا) */
     fun onTick(surah: Int, positionMs: Long, durationMs: Long) {
@@ -57,7 +66,7 @@ class ProgressRecorder(
 
     /** تصفير موضع سورة واحدة */
     fun resetSurah(surah: Int) {
-        scope.launch {
+        scope.launch(writer) {
             progressDao.delete(surah)
             settings.clearLastIfSurah(surah)
         }
@@ -81,7 +90,7 @@ class ProgressRecorder(
         val safeDuration = durationMs.coerceAtLeast(0L)
         val position = ProgressMath.normalizePosition(positionMs, safeDuration)
 
-        scope.launch {
+        scope.launch(writer) {
             try {
                 if (writeDb) {
                     // إذا كانت المدة غير معروفة في هذه اللحظة نحتفظ بالمدة المحفوظة سابقًا
