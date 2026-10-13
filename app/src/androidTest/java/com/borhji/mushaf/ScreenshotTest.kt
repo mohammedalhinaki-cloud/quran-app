@@ -1,6 +1,7 @@
 package com.borhji.mushaf
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -60,8 +61,19 @@ class ScreenshotTest {
 
         // 2) المشغل الموسّع (بالضغط على المشغل المصغّر كما يفعل المستخدم)
         composeRule.onNodeWithTag(MINI_PLAYER_TAG).performClick()
+        // ننتظر ظهور عنصر خاص بالمشغل الموسّع فقط (تحقق فعلي لا مُهلة عمياء)
+        val expandedOpened = try {
+            composeRule.waitUntil(20_000L) {
+                composeRule.onAllNodesWithText("سرعة التشغيل").fetchSemanticsNodes().isNotEmpty()
+            }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+        println("EXPANDED_PLAYER_OPENED=$expandedOpened")
         Thread.sleep(2_000L)
         capture("02-player-expanded.png")
+        assertTrue("لم يُفتح المشغل الموسّع عند الضغط على المشغل المصغّر", expandedOpened)
 
         // إغلاق المشغل الموسّع
         device.pressBack()
