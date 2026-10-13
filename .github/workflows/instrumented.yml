@@ -36,46 +36,99 @@ jobs:
 
       # ---------- نقطة تفتيش 1: تجهيز صورة النظام وإنشاء الجهاز ----------
       - name: تجهيز صورة النظام وإنشاء الجهاز الافتراضي
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: |
           set -x
           : > /tmp/inst.log
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           chmod +x ./gradlew
           log() { echo "$@" | tee -a /tmp/inst.log; }
+
           log "kvm: $(ls -l /dev/kvm 2>&1)"
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          log "=== الحزم المثبتة مسبقًا ==="
-          timeout 180 sdkmanager --list_installed 2>&1 | head -40 | tee -a /tmp/inst.log || true
+          log "=== محتوى مكتبة SDK ==="
+          ls "$ANDROID_HOME" 2>&1 | tee -a /tmp/inst.log || true
 
-          log "=== تثبيت المحاكي وأدوات المنصة ==="
-          for pkg in "platform-tools" "emulator"; do
-            timeout 900 bash -c "yes | sdkmanager --sdk_root='$ANDROID_HOME' '$pkg' > /tmp/sdk-$pkg.log 2>&1" \
-              && log "تم تثبيت $pkg" || { log "فشل تثبيت $pkg"; tail -8 "/tmp/sdk-$pkg.log" | tee -a /tmp/inst.log || true; }
+          log "=== البحث عن أدوات سطر الأوامر ==="
+          SDKM=""
+          for cand in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"; do
+            if [ -n "$cand" ] && [ -x "$cand" ]; then SDKM="$cand"; break; fi
           done
+          log "SDKM=$SDKM"
+          if [ -z "$SDKM" ]; then
+            log "لم تُوجد أدوات سطر الأوامر — تنزيلها من مستودع أندرويد"
+            TIMEOUT_CMD=""
+            command -v timeout > /dev/null 2>&1 && TIMEOUT_CMD="timeout 600"
+            $TIMEOUT_CMD curl -sSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip || true
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            command -v unzip > /dev/null 2>&1 && unzip -q -o /tmp/cmdline.zip -d /tmp/cmdline-tools || true
+            rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+            mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" 2>/dev/null || true
+            [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] && SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            log "SDKM=$SDKM"
+          fi
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          if [ -n "$SDKM" ]; then
+            echo "$(dirname "$SDKM")" >> "$GITHUB_PATH"
+            export PATH="$(dirname "$SDKM"):$PATH"
+          fi
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          command -v avdmanager | tee -a /tmp/inst.log || true
 
-          log "=== تنزيل صورة النظام ==="
-          SDK_IMG=""
-          for tag in aosp_atd google_atd default google_apis; do
-            CAND="system-images;android-34;$tag;x86_64"
-            log "محاولة: $CAND"
-            if timeout 900 bash -c "yes | sdkmanager --sdk_root='$ANDROID_HOME' '$CAND' > /tmp/sdk-img.log 2>&1" \
-               && [ -d "$ANDROID_HOME/system-images/android-34/$tag/x86_64" ]; then
-              SDK_IMG="$CAND"
-              log "تم تثبيت صورة النظام: $SDK_IMG"
-              break
-            fi
-            tail -4 /tmp/sdk-img.log | tee -a /tmp/inst.log || true
-          done
+          log "=== الصور المثبتة مسبقًا ==="
+          INSTALLED=""
+          if [ -n "$SDKM" ]; then
+            timeout 300 "$SDKM" --sdk_root="$ANDROID_HOME" --licenses < /dev/null > /dev/null 2>&1 || true
+            INSTALLED=$(timeout 300 "$SDKM" --sdk_root="$ANDROID_HOME" --list_installed 2>/dev/null | tr -d '\r' || true)
+            echo "$INSTALLED" | head -40 | tee -a /tmp/inst.log || true
+          fi
+
+          pick_image() {
+            local best="" bestscore=-1 img api tag score
+            while read -r img; do
+              [ -z "$img" ] && continue
+              api=$(echo "$img" | cut -d';' -f2 | tr -dc '0-9')
+              tag=$(echo "$img" | cut -d';' -f3)
+              [ -z "$api" ] && continue
+              [ "$api" -lt 29 ] && continue
+              score=$(( api * 100 ))
+              case "$tag" in
+                aosp_atd) score=$((score+40));;
+                google_atd) score=$((score+30));;
+                default) score=$((score+20));;
+                google_apis) score=$((score+10));;
+                *) score=$((score+5));;
+              esac
+              if [ "$score" -gt "$bestscore" ]; then bestscore=$score; best="$img"; fi
+            done <<< "$(echo "$1" | grep -oE 'system-images;android-[0-9]+;[a-z_]+;x86_64' | sort -u)"
+            echo "$best"
+          }
+
+          SDK_IMG=$(pick_image "$INSTALLED")
+          log "صورة مثبتة مسبقًا: $SDK_IMG"
+
+          if [ -z "$SDK_IMG" ] && [ -n "$SDKM" ]; then
+            log "=== تنزيل صورة نظام ==="
+            for tag in aosp_atd google_atd default google_apis; do
+              for api in 34 33 35; do
+                CAND="system-images;android-$api;$tag;x86_64"
+                log "محاولة: $CAND"
+                if timeout 900 bash -c "yes | '$SDKM' --sdk_root='$ANDROID_HOME' '$CAND' > /tmp/sdk-img.log 2>&1" \
+                   && [ -d "$ANDROID_HOME/system-images/android-$api/$tag/x86_64" ]; then
+                  SDK_IMG="$CAND"; log "تم تثبيت: $SDK_IMG"; break 2
+                fi
+                tail -3 /tmp/sdk-img.log 2>/dev/null | tee -a /tmp/inst.log || true
+              done
+            done
+          fi
+
           if [ -z "$SDK_IMG" ]; then
-            log "تعذّر تنزيل أي صورة نظام"
-            { echo "## (تفتيش 1) تعذّر تنزيل صورة نظام للمحاكي — الجلسة ${{ github.run_number }}"; echo '```'; tail -60 /tmp/inst.log; echo '```'; } > /tmp/c1.md
+            log "تعذّر توفير صورة نظام"
+            { echo "## (تفتيش 1) تعذّر توفير صورة نظام للمحاكي — الجلسة ${{ github.run_number }}"; echo '```'; tail -70 /tmp/inst.log; echo '```'; } > /tmp/c1.md
             jq -n --arg body "$(cat /tmp/c1.md)" '{body:$body}' > /tmp/c1.json
             gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c1.json || true
             exit 1
@@ -83,8 +136,13 @@ jobs:
           echo "SDK_IMG=$SDK_IMG" >> "$GITHUB_ENV"
           echo no | timeout 180 avdmanager create avd -n mushaf34 -k "$SDK_IMG" -d pixel_5 --force 2>&1 | tee -a /tmp/inst.log || true
           timeout 90 avdmanager list avd 2>&1 | head -12 | tee -a /tmp/inst.log || true
-          ls -d "$ANDROID_HOME/system-images/android-34"/*/x86_64 2>&1 | tee -a /tmp/inst.log || true
           ls -l "$ANDROID_HOME/emulator/emulator" 2>&1 | tee -a /tmp/inst.log || true
+          if [ -n "$SDKM" ] && [ ! -x "$ANDROID_HOME/emulator/emulator" ]; then
+            log "=== تثبيت حزمة المحاكي ==="
+            timeout 900 bash -c "yes | '$SDKM' --sdk_root='$ANDROID_HOME' 'emulator' > /tmp/sdk-emu.log 2>&1" || true
+            tail -5 /tmp/sdk-emu.log 2>/dev/null | tee -a /tmp/inst.log || true
+            ls -l "$ANDROID_HOME/emulator/emulator" 2>&1 | tee -a /tmp/inst.log || true
+          fi
 
       # ---------- نقطة تفتيش 2: تشغيل المحاكي ----------
       - name: تشغيل المحاكي (بمهلة محدودة)
