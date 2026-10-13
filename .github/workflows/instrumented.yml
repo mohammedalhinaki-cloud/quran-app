@@ -48,7 +48,14 @@ jobs:
           chmod +x ./gradlew
           log() { echo "$@" | tee -a /tmp/inst.log; }
 
-          log "kvm: $(ls -l /dev/kvm 2>&1)"
+          log "kvm قبل الإصلاح: $(ls -l /dev/kvm 2>&1)"
+          log "المستخدم: $(id)"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null || true
+          sudo udevadm control --reload-rules > /dev/null 2>&1 || true
+          sudo udevadm trigger --name-match=kvm > /dev/null 2>&1 || true
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          sudo usermod -aG kvm "$(id -un)" > /dev/null 2>&1 || true
+          log "kvm بعد الإصلاح: $(ls -l /dev/kvm 2>&1)"
           log "=== محتوى مكتبة SDK ==="
           ls "$ANDROID_HOME" 2>&1 | tee -a /tmp/inst.log || true
 
@@ -237,9 +244,10 @@ jobs:
           for i in $(seq 1 60); do
             B=$(timeout 20 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             if [ "$B" = "1" ]; then BOOTED=1; break; fi
-            sleep 10
+            if ! pgrep -f "qemu-system" > /dev/null 2>&1; then log "توقّف المحاكي في الدورة $i"; break; fi
+            sleep 5
           done
-          log "BOOT_COMPLETED=$BOOTED بعد $((i*10)) ثانية"
+          log "BOOT_COMPLETED=$BOOTED بعد $((i*5)) ثانية"
           timeout 30 adb shell input keyevent 82 || true
           sleep 15
           log "أجهزة adb المتصلة:"; adb devices | tee -a /tmp/inst.log
