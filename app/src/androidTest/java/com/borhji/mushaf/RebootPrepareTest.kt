@@ -52,13 +52,11 @@ class RebootPrepareTest {
             TestSupport.waitUntil(10_000L) { playback.state.value.positionMs >= preparedPositionMs - 1_000L },
         )
 
-        // إيقاف مؤقت → حفظ فوري للموضع في قاعدة البيانات وفي إعدادات الجلسة
-        playback.pause()
+        // الحفظ فوري عند تحريك شريط التقدم — ننتظر أن يُكتب الموضع فعليًا في قاعدة البيانات
         assertTrue(
-            "لم يتوقف التشغيل بعد الإيقاف المؤقت",
-            TestSupport.waitUntil(10_000L) { !playback.state.value.isPlaying },
+            "لم يُحفظ موضع الاستماع بعد الانتقال",
+            TestSupport.waitUntil(15_000L) { runBlocking { library.progressFor(2) }?.positionMs ?: 0L > 0L },
         )
-        Thread.sleep(1_500L)
 
         val row = runBlocking { library.progressFor(2) }
         assertNotNull("لم يُحفظ موضع السورة في قاعدة البيانات", row)
@@ -74,6 +72,6 @@ class RebootPrepareTest {
         println("PREPARED_SESSION_POSITION_MS=${prefs.lastPositionMs}")
         println("PREPARED_DURATION_MS=${row?.durationMs}")
 
-        // ملاحظة: لا نُنظّف المشغل هنا — نترك الحالة كما هي ليتم التحقق منها بعد إعادة التشغيل.
+        // ملاحظة: نترك التشغيل مستمرًا (والحالة محفوظة) ليتم التحقق منها بعد إعادة التشغيل.
     }
 }
