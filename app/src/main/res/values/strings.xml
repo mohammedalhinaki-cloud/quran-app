@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">المصحف المرتل</string>
+    <string name="reader_name">أ.د. محمد برهجي</string>
+    <string name="riwayah">حفص عن عاصم بقصر المنفصل</string>
+    <string name="notification_channel_name">تشغيل التلاوة</string>
+    <string name="notification_channel_description">إشعار المشغل للتحكم في التلاوة</string>
+</resources>

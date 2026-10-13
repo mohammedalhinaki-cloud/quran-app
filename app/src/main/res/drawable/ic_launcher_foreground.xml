@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- رمز التطبيق: مصحف مفتوح + زخرفة ذهبية -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- نجمة ذهبية أعلى المصحف -->
+    <path
+        android:fillColor="#FFE0B24A"
+        android:pathData="M54,24 L56.2,29.6 L62,29.9 L57.5,33.7 L59,39.4 L54,36.1 L49,39.4 L50.5,33.7 L46,29.9 L51.8,29.6 Z" />
+
+    <!-- الصفحة اليمنى -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M56,42 L80,48 L80,80 L56,76 Z" />
+
+    <!-- الصفحة اليسرى -->
+    <path
+        android:fillColor="#FFF3F7F5"
+        android:pathData="M52,42 L28,48 L28,80 L52,76 Z" />
+
+    <!-- شريط ذهبي (علامة الكتاب) -->
+    <path
+        android:fillColor="#FFE0B24A"
+        android:pathData="M50,43.5 L58,43.5 L58,62 L54,57.5 L50,62 Z" />
+</vector>

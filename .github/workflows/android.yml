@@ -1,0 +1,92 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: بناء APK واختبارات الوحدة
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: تنزيل الشيفرة
+        uses: actions/checkout@v4
+
+      - name: تهيئة Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: تهيئة Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: تهيئة Gradle (مع التخزين المؤقت)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: تجهيز الـ wrapper
+        run: chmod +x ./gradlew
+
+      - name: اختبارات الوحدة
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --stacktrace
+
+      - name: بناء APK (debug)
+        run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
+
+      - name: بناء APK (release)
+        run: ./gradlew --no-daemon :app:assembleRelease --stacktrace
+
+      - name: تجميع الملفات
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/borhji-mushaf-debug.apk
+          find app/build/outputs/apk/release -name '*.apk' -exec cp {} artifacts/borhji-mushaf-release.apk \;
+          ls -la artifacts
+          sha256sum artifacts/*.apk
+
+      - name: رفع ملفات APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: borhji-mushaf-apk
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: نتائج اختبارات الوحدة
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: نشر إصدار على GitHub (فرع main فقط)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "المصحف المرتل | محمد برهجي — إصدار v1.0.${{ github.run_number }}"
+          body: |
+            تطبيق «المصحف المرتل | محمد برهجي» — مشغل تلاوات محلي بالكامل.
+
+            - الرواية: حفص عن عاصم بقصر المنفصل
+            - يعمل دون إنترنت ولا يرفع أي ملف لأي خادم
+            - يستمر التشغيل في الخلفية مع إشعار تحكم وأزرار السماعات
+            - حفظ دقيق لموضع الاستماع لكل سورة
+
+            حمّل الملف `borhji-mushaf-release.apk` وثبّته على الهاتف مباشرة.
+          files: artifacts/*.apk

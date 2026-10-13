@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  النسخ الاحتياطي: نحفظ قاعدة البيانات والإعدادات (مواضع الاستماع) لكن نستبعد
+  النسخ الصوتية المستوردة لأنها ملفات كبيرة ويمكن إعادة استيرادها.
+-->
+<full-backup-content>
+    <exclude domain="file" path="library" />
+</full-backup-content>
