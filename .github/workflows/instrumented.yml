@@ -303,6 +303,21 @@ jobs:
           else
             echo "PHASE1_VERDICT=passed" | tee -a /tmp/inst.log
           fi
+
+          log "=== المرحلة 1ب: تجهيز موضع استماع حقيقي قبل إعادة التشغيل ==="
+          timeout 900 adb shell am instrument -w -r \
+            -e class com.borhji.mushaf.RebootPrepareTest \
+            "$RUNNER" > /tmp/phase1b.log 2>&1
+          echo "PHASE1B_EXIT=$?" | tee -a /tmp/inst.log
+          cat /tmp/phase1b.log >> /tmp/inst.log
+          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|INSTRUMENTATION_CODE: -1|shortMsg=" /tmp/phase1b.log; then
+            echo "PHASE1B_VERDICT=failed" | tee -a /tmp/inst.log
+          else
+            echo "PHASE1B_VERDICT=passed" | tee -a /tmp/inst.log
+          fi
+          { echo "## (تفتيش 4ب) تجهيز حالة الاستئناف قبل إعادة التشغيل — الجلسة ${{ github.run_number }}"; echo '```'; grep -E "PREPARED_|Tests run|OK|FAILURES|PHASE1B" /tmp/phase1b.log | tail -20; echo '```'; } > /tmp/c4b.md
+          jq -n --arg body "$(cat /tmp/c4b.md)" '{body:$body}' > /tmp/c4b.json
+          gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c4b.json || true
           { echo "## (تفتيش 4) نتيجة المرحلة 1 — الجلسة ${{ github.run_number }}"; echo '```'; grep -E "^(OK|FAILURES|Tests run|Time:|INSTRUMENTATION|PHASE1_EXIT)" /tmp/inst.log | tail -20; echo '```'; echo "### الفشل"; echo '```'; grep -E "junit|AssertionError|Exception|Error" /tmp/phase1.log | head -40; echo '```'; } > /tmp/c4.md
           jq -n --arg body "$(cat /tmp/c4.md)" '{body:$body}' > /tmp/c4.json
           gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c4.json || true
@@ -353,6 +368,7 @@ jobs:
         run: |
           verdict=0
           grep -q "PHASE1_VERDICT=passed" /tmp/inst.log 2>/dev/null || { echo "المرحلة 1 لم تكتمل أو فشلت"; verdict=1; }
+          grep -q "PHASE1B_VERDICT=passed" /tmp/inst.log 2>/dev/null || { echo "مرحلة التجهيز (1ب) لم تكتمل أو فشلت"; verdict=1; }
           grep -q "PHASE2_VERDICT=passed" /tmp/inst.log 2>/dev/null || { echo "المرحلة 2 لم تكتمل أو فشلت"; verdict=1; }
           echo "VERDICT=$verdict" | tee -a /tmp/inst.log
           exit $verdict
@@ -371,11 +387,11 @@ jobs:
             echo ""
             echo "### ملخص النتائج"
             echo '```'
-            grep -E "^(OK|FAILURES|Tests run|Time:|PHASE|BOOT|REBOOT|BUILD_EXIT|SDK_IMG|VERDICT|INSTRUMENTATION_CODE|INSTRUMENTATION_FAILED)" /tmp/inst.log 2>/dev/null | tail -40 || echo "لا يوجد ملخص"
+            grep -E "^(OK|FAILURES|Tests run|Time:|PHASE|BOOT|REBOOT|BUILD_EXIT|SDK_IMG|VERDICT|PREPARED_|INSTRUMENTATION_CODE|INSTRUMENTATION_FAILED)" /tmp/inst.log 2>/dev/null | tail -40 || echo "لا يوجد ملخص"
             echo '```'
             echo "### الاختبارات الفاشلة"
             echo '```'
-            awk '/INSTRUMENTATION_STATUS: test=/{t=$0} /INSTRUMENTATION_STATUS_CODE: -/{print t"  ==>  "$0}' /tmp/phase1.log /tmp/phase2.log 2>/dev/null | sed 's/INSTRUMENTATION_STATUS: //g' | head -30 || true
+            awk '/INSTRUMENTATION_STATUS: test=/{t=$0} /INSTRUMENTATION_STATUS_CODE: -/{print t"  ==>  "$0}' /tmp/phase1.log /tmp/phase1b.log /tmp/phase2.log 2>/dev/null | sed 's/INSTRUMENTATION_STATUS: //g' | head -30 || true
             echo '```'
             echo "### حالات الفشل"
             echo '```'
@@ -388,6 +404,10 @@ jobs:
             echo "### سجل المرحلة 1 (آخر 120 سطرًا)"
             echo '```'
             tail -120 /tmp/phase1.log 2>/dev/null || echo "لا سجل"
+            echo '```'
+            echo "### سجل تجهيز حالة الاستئناف (آخر 40 سطرًا)"
+            echo '```'
+            grep -E "PREPARED_|Tests run|OK|FAILURES|Time:" /tmp/phase1b.log 2>/dev/null | tail -20 || echo "لا سجل"
             echo '```'
             echo "### سجل المرحلة 2 (آخر 80 سطرًا)"
             echo '```'

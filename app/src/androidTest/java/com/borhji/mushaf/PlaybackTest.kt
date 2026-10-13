@@ -1,5 +1,8 @@
 package com.borhji.mushaf
 
+import android.app.Notification
+import android.app.NotificationManager
+import android.content.Context
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -114,17 +117,54 @@ class PlaybackTest {
     }
 
     @Test
-    fun showsPlaybackNotificationWithSurahName() {
+    fun showsPlaybackNotificationWithSurahNameAndControls() {
         playback.playSurah(2, startPositionMs = 0L, autoPlay = true)
-        assertTrue(TestSupport.waitUntil(30_000L) { playback.state.value.isPlaying })
-        Thread.sleep(3_000L)
+        assertTrue(
+            "لم يبدأ التشغيل فلا يمكن التحقق من الإشعار",
+            TestSupport.waitUntil(30_000L) { playback.state.value.isPlaying },
+        )
 
-        device.openNotification()
-        val found = TestSupport.waitUntil(10_000L, 500L) {
-            device.findObject(By.textContains("البقرة")) != null
+        // نضع التطبيق في الخلفية — وهو السيناريو المطلوب (استخدام تطبيقات أخرى)
+        device.pressHome()
+        Thread.sleep(2_500L)
+
+        // (1) تحقق فعلي من وجود إشعار التشغيل ومحتواه وأزرار التحكم عبر خدمة الإشعارات
+        val manager =
+            app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        var title = ""
+        var actionCount = 0
+        val found = TestSupport.waitUntil(25_000L, 500L) {
+            val active = manager.activeNotifications.firstOrNull { it.packageName == app.packageName }
+            if (active != null) {
+                title = active.notification.extras
+                    ?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                actionCount = active.notification.actions?.size ?: 0
+                title.contains("البقرة")
+            } else {
+                false
+            }
         }
-        device.pressBack()
-        assertTrue("لم يظهر إشعار التشغيل باسم السورة", found)
+        println("NOTIFICATION_TITLE=$title ACTIONS=$actionCount")
+        assertTrue("لم يظهر إشعار تشغيل باسم السورة (العنوان الظاهر: «$title»)", found)
+        assertTrue(
+            "الإشعار لا يحتوي أزرار تحكم كافية (عدد الأزرار: $actionCount)",
+            actionCount >= 2,
+        )
+
+        // (2) محاولة تحقق بصري من ظهور الإشعار على الشاشة.
+        //     النتيجة تُسجَّل في السجل؛ قد لا تُصيّر صورة المحاكي المستخدمة في CI لوحة الإشعارات.
+        try {
+            device.wakeUp()
+            device.executeShellCommand("wm dismiss-keyguard")
+            device.openNotification()
+            val visible = TestSupport.waitUntil(8_000L, 400L) {
+                device.findObject(By.textContains("البقرة")) != null
+            }
+            println("NOTIFICATION_VISIBLE_ON_SCREEN=$visible")
+            device.pressBack()
+        } catch (t: Throwable) {
+            println("NOTIFICATION_VISIBLE_ON_SCREEN=unknown (${t.javaClass.simpleName})")
+        }
     }
 
     @Test

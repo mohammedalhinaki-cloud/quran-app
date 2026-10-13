@@ -56,11 +56,18 @@ class RebootPersistenceTest {
 
     @Test
     fun resumeCardIsShownWithSavedPositionAfterReboot() {
-        val prefs = runBlocking { container.settings.snapshot() }
-        val surahName = SURAH_BY_NUMBER[prefs.lastSurah ?: 2]?.name ?: "البقرة"
-        val expectedPosition = TimeFormat.clock(prefs.lastPositionMs)
+        val lastSurah = runBlocking { container.settings.snapshot().lastSurah }
+        val surahNumber = lastSurah ?: 2
+        val surahName = SURAH_BY_NUMBER[surahNumber]?.name ?: "البقرة"
 
-        composeRule.onAllNodesWithText("متابعة الاستماع").onFirst().assertIsDisplayed()
+        // بطاقة «متابعة الاستماع» تعرض الموضع المحفوظ في قاعدة البيانات لنفس السورة
+        val storedPosition = runBlocking { container.library.progressFor(surahNumber)?.positionMs ?: 0L }
+        val expectedPosition = TimeFormat.clock(storedPosition)
+        assertTrue("لا يوجد موضع محفوظ للتحقق من البطاقة", storedPosition > 0L)
+
+        composeRule.waitUntil(20_000L) {
+            composeRule.onAllNodesWithText("متابعة الاستماع").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("سورة $surahName").assertIsDisplayed()
         composeRule.onAllNodesWithText("الموضع المحفوظ: $expectedPosition", substring = true)
             .onFirst()
