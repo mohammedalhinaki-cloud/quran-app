@@ -134,8 +134,70 @@ jobs:
             exit 1
           fi
           echo "SDK_IMG=$SDK_IMG" >> "$GITHUB_ENV"
-          echo no | timeout 180 avdmanager create avd -n mushaf34 -k "$SDK_IMG" -d pixel_5 --force 2>&1 | tee -a /tmp/inst.log || true
-          timeout 90 avdmanager list avd 2>&1 | head -12 | tee -a /tmp/inst.log || true
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_AVD_HOME"
+
+          log "=== إنشاء الجهاز الافتراضي ==="
+          AVDM="$(command -v avdmanager 2>/dev/null || true)"
+          [ -z "$AVDM" ] && [ -n "$SDKM" ] && [ -x "$(dirname "$SDKM")/avdmanager" ] && AVDM="$(dirname "$SDKM")/avdmanager"
+          log "AVDM=$AVDM"
+          if [ -n "$AVDM" ]; then
+            echo no | timeout 180 "$AVDM" create avd -n mushaf34 -k "$SDK_IMG" -d pixel_5 --force 2>&1 | tee -a /tmp/inst.log || true
+          fi
+          if [ ! -f "$ANDROID_AVD_HOME/mushaf34.ini" ] && [ -n "$AVDM" ]; then
+            log "إعادة المحاولة بدون تحديد الجهاز"
+            echo no | timeout 180 "$AVDM" create avd -n mushaf34 -k "$SDK_IMG" --force 2>&1 | tee -a /tmp/inst.log || true
+          fi
+          if [ ! -f "$ANDROID_AVD_HOME/mushaf34.ini" ]; then
+            log "=== إنشاء الجهاز يدويًا (بدون avdmanager) ==="
+            IMG_DIR=$(echo "$SDK_IMG" | sed 's/;system-images;/system-images;/' | awk -F';' '{print $2"/"$3"/"$4}')
+            TAG_ID=$(echo "$SDK_IMG" | awk -F';' '{print $3}')
+            API_NUM=$(echo "$SDK_IMG" | awk -F';' '{print $2}' | tr -dc '0-9')
+            mkdir -p "$ANDROID_AVD_HOME/mushaf34.avd"
+            {
+              echo "AvdId=mushaf34"
+              echo "avd.ini.displayname=mushaf34"
+              echo "image.sysdir.1=$IMG_DIR/"
+              echo "tag.id=$TAG_ID"
+              echo "tag.display=Android"
+              echo "abi.type=x86_64"
+              echo "hw.cpu.arch=x86_64"
+              echo "hw.cpu.ncore=2"
+              echo "hw.ramSize=2048"
+              echo "vm.heapSize=256"
+              echo "hw.lcd.density=420"
+              echo "hw.lcd.height=1920"
+              echo "hw.lcd.width=1080"
+              echo "disk.dataPartition.size=4096M"
+              echo "hw.gpu.enabled=yes"
+              echo "hw.gpu.mode=swiftshader_indirect"
+              echo "hw.keyboard=yes"
+              echo "hw.audioInput=no"
+              echo "hw.audioOutput=no"
+              echo "hw.camera.back=none"
+              echo "hw.camera.front=none"
+              echo "hw.sdCard=no"
+              echo "skin.dynamic=yes"
+            } > "$ANDROID_AVD_HOME/mushaf34.avd/config.ini"
+            {
+              echo "avd.ini.encoding=UTF-8"
+              echo "path=$ANDROID_AVD_HOME/mushaf34.avd"
+              echo "path.rel=avd/mushaf34.avd"
+              echo "target=android-$API_NUM"
+            } > "$ANDROID_AVD_HOME/mushaf34.ini"
+          fi
+          ls -l "$ANDROID_AVD_HOME" 2>&1 | tee -a /tmp/inst.log || true
+          cat "$ANDROID_AVD_HOME/mushaf34.ini" 2>&1 | tee -a /tmp/inst.log || true
+          if [ ! -f "$ANDROID_AVD_HOME/mushaf34.ini" ]; then
+            log "تعذّر إنشاء الجهاز الافتراضي"
+            { echo "## (تفتيش 1) تعذّر إنشاء الجهاز الافتراضي — الجلسة ${{ github.run_number }}"; echo '```'; tail -80 /tmp/inst.log; echo '```'; } > /tmp/c1b.md
+            jq -n --arg body "$(cat /tmp/c1b.md)" '{body:$body}' > /tmp/c1b.json
+            gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" --input /tmp/c1b.json || true
+            exit 1
+          fi
+          if [ -n "$AVDM" ]; then timeout 90 "$AVDM" list avd 2>&1 | head -14 | tee -a /tmp/inst.log || true; fi
+          cp /tmp/inst.log /tmp/setup.log
           ls -l "$ANDROID_HOME/emulator/emulator" 2>&1 | tee -a /tmp/inst.log || true
           if [ -n "$SDKM" ] && [ ! -x "$ANDROID_HOME/emulator/emulator" ]; then
             log "=== تثبيت حزمة المحاكي ==="
@@ -164,6 +226,8 @@ jobs:
           fi
           ls -l "$EMU_BIN" 2>&1 | tee -a /tmp/inst.log || true
           timeout 120 "$EMU_BIN" -accel-check 2>&1 | tee -a /tmp/inst.log || log "تحذير: -accel-check لم ينجح"
+          log "=== الأجهزة الافتراضية المتاحة ==="
+          timeout 60 "$EMU_BIN" -list-avds 2>&1 | tee -a /tmp/inst.log || true
           log "=== تشغيل المحاكي: $EMU_BIN ==="
           nohup "$EMU_BIN" -avd mushaf34 -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-audio \
             -camera-back none -camera-front none -netdelay none -netspeed full > /tmp/emulator.log 2>&1 &
@@ -284,6 +348,10 @@ jobs:
             echo "### حالات الفشل"
             echo '```'
             grep -E "(junit\.framework|java\.lang\.AssertionError|Exception|Error|Caused by)" /tmp/inst.log 2>/dev/null | head -50 || true
+            echo '```'
+            echo "### سجل التجهيز (مقتطف)"
+            echo '```'
+            grep -E "kvm|SDKM=|AVDM=|AVD|avdmanager|SDK_IMG|EMU_BIN|EMU|محاولة|تم تثبيت|تعذّر|BOOT|استخدم|قائمة" /tmp/setup.log 2>/dev/null | tail -60 || echo "لا سجل تجهيز"
             echo '```'
             echo "### سجل المرحلة 1 (آخر 120 سطرًا)"
             echo '```'
