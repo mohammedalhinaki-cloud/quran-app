@@ -105,9 +105,9 @@ jobs:
               [ "$api" -lt 29 ] && continue
               score=$(( api * 100 ))
               case "$tag" in
-                aosp_atd) score=$((score+40));;
-                google_atd) score=$((score+30));;
-                default) score=$((score+20));;
+                default) score=$((score+40));;
+                aosp_atd) score=$((score+30));;
+                google_atd) score=$((score+20));;
                 google_apis) score=$((score+10));;
                 *) score=$((score+5));;
               esac
@@ -121,7 +121,7 @@ jobs:
 
           if [ -z "$SDK_IMG" ] && [ -n "$SDKM" ]; then
             log "=== تنزيل صورة نظام ==="
-            for tag in aosp_atd google_atd default google_apis; do
+            for tag in default aosp_atd google_apis google_atd; do
               for api in 34 33 35; do
                 CAND="system-images;android-$api;$tag;x86_64"
                 log "محاولة: $CAND"
@@ -251,7 +251,14 @@ jobs:
           done
           log "BOOT_COMPLETED=$BOOTED بعد $((i*5)) ثانية"
           timeout 30 adb shell input keyevent 82 || true
+          # نُبقي الشاشة مضاءة وغير مقفلة (مهم لالتقاط لقطات شاشة حقيقية)
+          timeout 30 adb shell svc power stayon true || true
+          timeout 30 adb shell settings put system screen_off_timeout 1800000 || true
+          timeout 30 adb shell input keyevent 224 || true
+          timeout 30 adb shell wm dismiss-keyguard || true
+          timeout 30 adb shell input keyevent 82 || true
           sleep 15
+          log "حالة الشاشة: $(timeout 20 adb shell dumpsys power | grep -m1 'mWakefulness' || true)"
           log "أجهزة adb المتصلة:"; adb devices | tee -a /tmp/inst.log
           if [ "$BOOTED" = "1" ]; then
             timeout 30 adb shell getprop ro.build.version.sdk | tee -a /tmp/inst.log || true
@@ -347,12 +354,17 @@ jobs:
           grep -aE "NOTIFICATION_TITLE|NOTIFICATION_VISIBLE|PREPARED_" /tmp/logcat-phase1.txt | tail -20 | tee -a /tmp/inst.log
 
           log "=== التقاط الشاشة الرئيسية ==="
+          timeout 30 adb shell svc power stayon true || true
+          timeout 30 adb shell input keyevent 224 || true
+          timeout 30 adb shell wm dismiss-keyguard || true
           timeout 60 adb shell am start -n com.borhji.mushaf.debug/com.borhji.mushaf.MainActivity
           sleep 8
+          log "النافذة الأمامية: $(timeout 20 adb shell dumpsys window | grep -m1 -i 'mCurrentFocus' || true)"
           timeout 90 adb exec-out screencap -p > /tmp/screenshots/01-home-playing.png
           ls -l /tmp/screenshots | tee -a /tmp/inst.log
 
           log "=== التقاط لوحة الإشعارات (أثناء التشغيل) ==="
+          timeout 30 adb shell input keyevent 224 || true
           timeout 60 adb shell cmd statusbar expand-notifications
           sleep 4
           timeout 90 adb exec-out screencap -p > /tmp/screenshots/02-notification-shade.png
@@ -370,6 +382,8 @@ jobs:
             sleep 5
             timeout 90 adb exec-out screencap -p > /tmp/screenshots/03-player-sheet.png
           fi
+          log "=== بصمات لقطات الشاشة (يجب أن تختلف — تطابق البصمات يعني شاشة سوداء) ==="
+          sha256sum /tmp/screenshots/*.png 2>/dev/null | tee -a /tmp/inst.log
           ls -l /tmp/screenshots | tee -a /tmp/inst.log
 
       # ---------- إعادة تشغيل الجهاز ----------
@@ -424,6 +438,9 @@ jobs:
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           mkdir -p /tmp/screenshots
+          timeout 30 adb shell svc power stayon true || true
+          timeout 30 adb shell input keyevent 224 || true
+          timeout 30 adb shell wm dismiss-keyguard || true
           timeout 60 adb shell am start -n com.borhji.mushaf.debug/com.borhji.mushaf.MainActivity
           sleep 8
           timeout 90 adb exec-out screencap -p > /tmp/screenshots/04-home-after-reboot.png
