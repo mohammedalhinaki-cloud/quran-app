@@ -39,7 +39,7 @@ if ! command -v "$JAVACMD" > /dev/null 2>&1; then
   exit 1
 fi
 
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+DEFAULT_JVM_OPTS="-Xmx64m -Xms64m"
 APP_BASE_NAME=${0##*/}
 
 CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
