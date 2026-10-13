@@ -6,6 +6,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
+import com.borhji.mushaf.ui.MINI_PLAYER_TAG
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
