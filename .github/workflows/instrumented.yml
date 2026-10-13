@@ -37,58 +37,102 @@ jobs:
         with:
           validate-wrappers: false
 
-      - name: تهيئة Android SDK
+      - name: تجهيز SDK والأدوات
         run: |
+          set -x
           : > /tmp/inst.log
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           chmod +x ./gradlew
+          ls -l /dev/kvm 2>&1 | tee -a /tmp/inst.log || echo "لا يوجد /dev/kvm" | tee -a /tmp/inst.log
+          grep -cE '(vmx|svm)' /proc/cpuinfo | tee -a /tmp/inst.log || true
 
-      - name: تشغيل الاختبارات على المحاكي
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: default
-          arch: x86_64
-          profile: pixel_5
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none -camera-front none
-          script: |
-            set -o pipefail
-            echo "=== بدء الاختبارات ===" | tee -a /tmp/inst.log
-            PKG=com.borhji.mushaf.debug
-            adb shell pm clear $PKG || true
-            # وضع الطيران: التأكد من أن كل الوظائف تعمل دون إنترنت
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
-            adb shell settings put global airplane_mode_on 1 || true
-            adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
-            echo "=== المرحلة 1: الاستيراد والتشغيل والخلفية والواجهة ===" | tee -a /tmp/inst.log
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.borhji.mushaf.LibraryImportTest,com.borhji.mushaf.PlaybackTest,com.borhji.mushaf.UiSmokeTest \
-              2>&1 | tee -a /tmp/inst.log
-            echo "PHASE1_EXIT=${PIPESTATUS[0]}" | tee -a /tmp/inst.log
-            cp -r app/build/outputs/androidTest-results /tmp/results-phase1 2>/dev/null || true
-            echo "=== إعادة تشغيل الجهاز ===" | tee -a /tmp/inst.log
-            adb reboot || true
-            adb wait-for-device || true
-            for i in $(seq 1 60); do
-              BOOTED=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-              if [ "$BOOTED" = "1" ]; then break; fi
-              sleep 5
-            done
-            adb shell input keyevent 82 || true
-            sleep 25
-            echo "BOOT_COMPLETED=$(adb shell getprop sys.boot_completed | tr -d '\r')" | tee -a /tmp/inst.log
-            echo "=== المرحلة 2: اختبارات ما بعد إعادة التشغيل ===" | tee -a /tmp/inst.log
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.borhji.mushaf.RebootPersistenceTest \
-              2>&1 | tee -a /tmp/inst.log
-            echo "PHASE2_EXIT=${PIPESTATUS[0]}" | tee -a /tmp/inst.log
-            cp -r app/build/outputs/androidTest-results /tmp/results-phase2 2>/dev/null || true
+      - name: تشغيل المحاكي وتنفيذ الاختبارات
+        run: |
+          set -o pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          log() { echo "$@" | tee -a /tmp/inst.log; }
+
+          log "=== تجهيز صورة النظام ==="
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          SDK_IMG="system-images;android-34;aosp_atd;x86_64"
+          if ! yes | sdkmanager "$SDK_IMG" > /tmp/sdk-img.log 2>&1; then
+            SDK_IMG="system-images;android-34;default;x86_64"
+            log "تعذّر تنزيل صورة atd، سنستخدم: $SDK_IMG"
+            yes | sdkmanager "$SDK_IMG" > /tmp/sdk-img.log 2>&1 || true
+          fi
+          sdkmanager "platform-tools" "emulator" > /tmp/sdk-pt.log 2>&1 || true
+          log "SDK_IMG=$SDK_IMG"
+          tail -3 /tmp/sdk-img.log | tee -a /tmp/inst.log || true
+
+          log "=== إنشاء جهاز افتراضي ==="
+          echo no | avdmanager create avd -n mushaf34 -k "$SDK_IMG" -d pixel_5 --force 2>&1 | tee -a /tmp/inst.log || true
+          avdmanager list avd 2>&1 | head -20 | tee -a /tmp/inst.log || true
+
+          log "=== تشغيل المحاكي ==="
+          nohup emulator -avd mushaf34 -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-audio -camera-back none -camera-front none -netdelay none -netspeed full > /tmp/emulator.log 2>&1 &
+          adb start-server > /dev/null 2>&1 || true
+          adb wait-for-device || true
+          BOOTED=0
+          for i in $(seq 1 90); do
+            B=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$B" = "1" ]; then BOOTED=1; break; fi
+            sleep 10
+          done
+          log "BOOT_COMPLETED=$BOOTED"
+          adb shell input keyevent 82 || true
+          adb shell wm size || true
+          sleep 15
+
+          log "=== بناء التطبيق وملف الاختبار ==="
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest 2>&1 | tail -40 | tee -a /tmp/inst.log
+
+          log "=== تثبيت التطبيق ==="
+          adb install -r -t app/build/outputs/apk/debug/app-debug.apk 2>&1 | tee -a /tmp/inst.log || true
+          adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk 2>&1 | tee -a /tmp/inst.log || true
+          adb shell pm clear com.borhji.mushaf.debug 2>&1 | tee -a /tmp/inst.log || true
+
+          log "=== وضع الطيران (بدون إنترنت) ==="
+          adb shell svc wifi disable || true
+          adb shell svc data disable || true
+          adb shell settings put global airplane_mode_on 1 || true
+          adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
+
+          RUNNER=com.borhji.mushaf.debug.test/androidx.test.runner.AndroidJUnitRunner
+          log "=== المرحلة 1: الاستيراد + التشغيل + الخلفية + إزالة المهمة + الإشعار + الواجهة ==="
+          adb shell am instrument -w -r \
+            -e class com.borhji.mushaf.LibraryImportTest,com.borhji.mushaf.PlaybackTest,com.borhji.mushaf.UiSmokeTest \
+            $RUNNER 2>&1 | tee -a /tmp/inst.log
+          log "PHASE1_EXIT=${PIPESTATUS[0]}"
+
+          log "=== إعادة تشغيل الجهاز ==="
+          adb reboot || true
+          adb wait-for-device || true
+          for i in $(seq 1 90); do
+            B=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$B" = "1" ]; then break; fi
+            sleep 10
+          done
+          adb shell input keyevent 82 || true
+          sleep 20
+          log "REBOOT_BOOT_COMPLETED=$(adb shell getprop sys.boot_completed | tr -d '\r')"
+
+          log "=== المرحلة 2: التحقق من بقاء الملفات والموضع بعد إعادة التشغيل ==="
+          adb shell am instrument -w -r \
+            -e class com.borhji.mushaf.RebootPersistenceTest \
+            $RUNNER 2>&1 | tee -a /tmp/inst.log
+          log "PHASE2_EXIT=${PIPESTATUS[0]}"
+
+          log "=== جدول التشغيل (للتأكد من استمرار الخدمة) ==="
+          adb shell dumpsys activity services com.borhji.mushaf.debug 2>&1 | head -25 | tee -a /tmp/inst.log || true
+
+          log "=== نهاية الاختبارات ==="
 
       - name: نشر تقرير الاختبارات (تعليق على الكوميت)
         if: always()
@@ -101,21 +145,21 @@ jobs:
             echo "* الكوميت: \`${{ github.sha }}\`"
             echo "* النتيجة الكلية للمهمة: \`${{ job.status }}\`"
             echo ""
-            echo "### نتائج الاختبارات (XML)"
-            for dir in /tmp/results-phase1 /tmp/results-phase2; do
-              echo "**$dir**"
-              if [ -d "$dir" ]; then
-                grep -rhoE '<testsuite [^>]*>' "$dir" 2>/dev/null | sed -E 's/.*name="([^"]*)".*tests="([0-9]+)".*failures="([0-9]+)".*errors="([0-9]+)".*skipped="([0-9]+)".*/  name=\1 tests=\2 failures=\3 errors=\4 skipped=\5/' || true
-                grep -rhoE '<testcase name="[^"]*"' "$dir" 2>/dev/null | sed 's/^/  - /' | head -40 || true
-                grep -rhoE '<failure[^>]*message="[^"]{0,300}' "$dir" 2>/dev/null | sed 's/^/  FAIL: /' | head -30 || true
-              else
-                echo "  لا توجد نتائج"
-              fi
-            done
-            echo ""
-            echo "### سجل الاختبارات (آخر 200 سطر)"
+            echo "### ملخص نتائج am instrument"
             echo '```'
-            tail -200 /tmp/inst.log 2>/dev/null || echo "لا يوجد سجل"
+            grep -E "^(OK|FAILURES|Tests run|Time:|INSTRUMENTATION|PHASE|BOOT|REBOOT)" /tmp/inst.log 2>/dev/null || echo "لا يوجد ملخص"
+            echo '```'
+            echo "### حالات الاختبار والأخطاء"
+            echo '```'
+            grep -E "(test[A-Za-z]+|junit\.framework|java\.lang\.AssertionError|Error|Exception|Caused by)" /tmp/inst.log 2>/dev/null | head -60 || true
+            echo '```'
+            echo "### سجل كامل (آخر 300 سطر)"
+            echo '```'
+            tail -300 /tmp/inst.log 2>/dev/null || echo "لا يوجد سجل"
+            echo '```'
+            echo "### سجل المحاكي (آخر 40 سطرًا)"
+            echo '```'
+            tail -40 /tmp/emulator.log 2>/dev/null || echo "لا يوجد سجل محاكي"
             echo '```'
           } > /tmp/report-inst.md
           jq -n --arg body "$(cat /tmp/report-inst.md)" '{body:$body}' > /tmp/report-inst.json
