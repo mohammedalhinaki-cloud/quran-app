@@ -1,16 +1,11 @@
 package com.borhji.mushaf
 
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import android.app.NotificationManager
-import android.content.Context
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -80,20 +75,5 @@ class RebootPrepareTest {
         println("PREPARED_DURATION_MS=${row?.durationMs}")
 
         // ملاحظة: لا نُنظّف المشغل هنا — نترك الحالة كما هي ليتم التحقق منها بعد إعادة التشغيل.
-    }
-
-    @Test
-    @Ignore("يُستخدم للتشخيص فقط: يطبع الإشعار النشط إن وُجد")
-    fun printsActiveNotification() {
-        val manager =
-            ApplicationProvider.getApplicationContext<Context>()
-                .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.activeNotifications.forEach { active ->
-            println(
-                "ACTIVE_NOTIFICATION=${active.packageName} " +
-                    "title=${active.notification.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)} " +
-                    "actions=${active.notification.actions?.size}",
-            )
-        }
     }
 }

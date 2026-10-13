@@ -39,6 +39,7 @@ jobs:
         timeout-minutes: 30
         run: |
           set -x
+          set +e
           : > /tmp/inst.log
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
@@ -218,6 +219,7 @@ jobs:
         timeout-minutes: 20
         run: |
           set -o pipefail
+          set +e
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           log() { echo "$@" | tee -a /tmp/inst.log; }
@@ -265,6 +267,7 @@ jobs:
         timeout-minutes: 35
         run: |
           set -o pipefail
+          set +e
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           log() { echo "$@" | tee -a /tmp/inst.log; }
@@ -289,6 +292,7 @@ jobs:
         timeout-minutes: 40
         run: |
           set -o pipefail
+          set +e
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           log() { echo "$@" | tee -a /tmp/inst.log; }
@@ -298,10 +302,12 @@ jobs:
             "$RUNNER" > /tmp/phase1.log 2>&1
           echo "PHASE1_EXIT=$?" | tee -a /tmp/inst.log
           cat /tmp/phase1.log >> /tmp/inst.log
-          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|INSTRUMENTATION_CODE: -1|shortMsg=" /tmp/phase1.log; then
+          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|shortMsg=|^Error in " /tmp/phase1.log; then
             echo "PHASE1_VERDICT=failed" | tee -a /tmp/inst.log
-          else
+          elif grep -qE "^OK \(" /tmp/phase1.log; then
             echo "PHASE1_VERDICT=passed" | tee -a /tmp/inst.log
+          else
+            echo "PHASE1_VERDICT=unknown" | tee -a /tmp/inst.log
           fi
 
           log "=== المرحلة 1ب: تجهيز موضع استماع حقيقي قبل إعادة التشغيل ==="
@@ -310,10 +316,12 @@ jobs:
             "$RUNNER" > /tmp/phase1b.log 2>&1
           echo "PHASE1B_EXIT=$?" | tee -a /tmp/inst.log
           cat /tmp/phase1b.log >> /tmp/inst.log
-          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|INSTRUMENTATION_CODE: -1|shortMsg=" /tmp/phase1b.log; then
+          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|shortMsg=|^Error in " /tmp/phase1b.log; then
             echo "PHASE1B_VERDICT=failed" | tee -a /tmp/inst.log
-          else
+          elif grep -qE "^OK \(" /tmp/phase1b.log; then
             echo "PHASE1B_VERDICT=passed" | tee -a /tmp/inst.log
+          else
+            echo "PHASE1B_VERDICT=unknown" | tee -a /tmp/inst.log
           fi
           { echo "## (تفتيش 4ب) تجهيز حالة الاستئناف قبل إعادة التشغيل — الجلسة ${{ github.run_number }}"; echo '```'; grep -E "PREPARED_|Tests run|OK|FAILURES|PHASE1B" /tmp/phase1b.log | tail -20; echo '```'; } > /tmp/c4b.md
           jq -n --arg body "$(cat /tmp/c4b.md)" '{body:$body}' > /tmp/c4b.json
@@ -346,6 +354,7 @@ jobs:
         timeout-minutes: 30
         run: |
           set -o pipefail
+          set +e
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           log() { echo "$@" | tee -a /tmp/inst.log; }
@@ -355,10 +364,12 @@ jobs:
             "$RUNNER" > /tmp/phase2.log 2>&1
           echo "PHASE2_EXIT=$?" | tee -a /tmp/inst.log
           cat /tmp/phase2.log >> /tmp/inst.log
-          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|INSTRUMENTATION_CODE: -1|shortMsg=" /tmp/phase2.log; then
+          if grep -qE "FAILURES!!!|Process crashed|INSTRUMENTATION_FAILED|shortMsg=|^Error in " /tmp/phase2.log; then
             echo "PHASE2_VERDICT=failed" | tee -a /tmp/inst.log
-          else
+          elif grep -qE "^OK \(" /tmp/phase2.log; then
             echo "PHASE2_VERDICT=passed" | tee -a /tmp/inst.log
+          else
+            echo "PHASE2_VERDICT=unknown" | tee -a /tmp/inst.log
           fi
           timeout 40 adb shell dumpsys activity services com.borhji.mushaf.debug 2>&1 | head -20 | tee -a /tmp/inst.log || true
 
@@ -391,7 +402,7 @@ jobs:
             echo '```'
             echo "### الاختبارات الفاشلة"
             echo '```'
-            awk '/INSTRUMENTATION_STATUS: test=/{t=$0} /INSTRUMENTATION_STATUS_CODE: -/{print t"  ==>  "$0}' /tmp/phase1.log /tmp/phase1b.log /tmp/phase2.log 2>/dev/null | sed 's/INSTRUMENTATION_STATUS: //g' | head -30 || true
+            awk '/INSTRUMENTATION_STATUS: test=/{t=$0} /INSTRUMENTATION_STATUS_CODE: -2/{print t"  ==>  "$0}' /tmp/phase1.log /tmp/phase1b.log /tmp/phase2.log 2>/dev/null | sed 's/INSTRUMENTATION_STATUS: //g' | head -30 || true
             echo '```'
             echo "### حالات الفشل"
             echo '```'
